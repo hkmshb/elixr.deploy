@@ -1,6 +1,7 @@
 """A colection of reusable functions for fabric bafiles.sed deployment.
 """
 import os
+import random
 from enum import Enum
 from fabric.contrib import files
 from fabric import operations as ops
@@ -10,11 +11,24 @@ from fabric.api import cd, env, local, run, sudo
 
 
 ## funcs
+
+
 def generate_random(length=50):
-    import random
     chars = 'abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*(-_=+)'
     text = ''.join(random.SystemRandom().choice(chars) for _ in range(length))
     return text
+
+
+def to_bool(value):
+    if type(value) not in (str,):
+        value = str(value)
+
+    value = value.lower()
+    if value in ('true', 'yes', 't', 'y', '1'):
+        return True
+    elif value in ('false', 'no', 'f', 'n', '0'):
+        return False
+    raise ValueError("Value '%s' cannot be converted to bool" % value)
 
 
 ## enum types
@@ -73,13 +87,13 @@ class FabHelper(object):
         
         
     def __init__(self, project, staging, repo_url, **extras):
-        self.staging = staging
+        self.staging = to_bool(staging)
         self._meta = self.Meta()
         self.ctx = self._meta.build_context(**extras)
         
         # update context
         self.ctx.site = self.ctx.project
-        if staging:
+        if self.staging:
             self.ctx.site += '-staging'
         self.ctx.site_dir = '%(base_dir)s/%(site)s' % self.ctx
 
@@ -251,8 +265,12 @@ class DjangoFabHelper(FabHelper):
         result = ops.put(lfile, rfile, mode=0o755)
         if not result.succeeded:
             raise Exception('Settings template upload failed.')
-
-        files.sed(rfile, 'SECRET_KEY =.+$', 'SECRET_KEY = "%s"' % generate_random())
+        
+        secret_key = generate_random()
+        if '&' in secret_key:
+            hex_chars = '0123456789abcdef'
+            secret_key = secret_key.replace('&', random.choice(hex_chars))
+        files.sed(rfile, 'SECRET_KEY =.+$', 'SECRET_KEY = "%s"' % secret_key)
         files.sed(rfile, 'ALLOWED_HOSTS =.+$', 'ALLOWED_HOSTS = ["%s"]' % env.host)
         
         db_name, passwd = (ctx.db_name, ctx.db_pwd)
